@@ -1,0 +1,21 @@
+#!/bin/sh
+
+TO_FILL=2
+TO_FILL=$1
+
+# remove excess zeros
+for i in `ls -d 0* 2>/dev/null`     # go only through dirs with 0 in the beginning
+do
+    mv $i $(echo $i | sed -e 's:^0*::')
+done
+
+# add needed zeros
+for i in *
+do
+    new=`printf "%0${TO_FILL}s" $i`
+    if [ "$i" != "$new" ]
+    then
+        echo $new
+        mv $i $new
+    fi
+done

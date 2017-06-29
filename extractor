@@ -1,0 +1,64 @@
+#!/bin/bash
+
+FILENAME=experiments
+
+if [ ! -e $FILENAME ]
+then
+  echo -n "Purpose of measurement: "
+  read purpose
+
+  echo -n "Measured molecule/system: "
+  read molecule
+
+  echo -n "Concentration of studied molecule / mM: "
+  read conc
+
+  echo -n "Date of start: "
+  read date
+
+  echo -n "temperature / K = "
+  read t
+
+  echo -n "pH = "
+  read pH
+
+  echo -n "salt concentration / mM = "
+  read salt
+  
+  printf \
+      "Conditions:
+
+Purpose:  %s
+Molecule: %s
+Concentration: %s mM
+Date of start: %s
+
+temperature / K = %.1f
+pH = %.1f
+salt concentration / mM = %s
+
+" "$purpose" "$molecule" $conc "$date" $t $pH $salt > $FILENAME
+fi
+
+
+sed -i "" "/Experiments/,$ d" $FILENAME
+
+{
+echo Experiments:
+for d in *
+do
+    if [ -f $d/acqus ]
+    then
+        printf "\rWorking on $d" >&2
+        printf '\n%s\n' $d
+        sed -i -e '$a\' $d/pdata/1/title   # append to each title final newline
+        head -1 $d/pdata/1/title || head -1 $d/pdata/*/title   # extract first line from topspin title
+        if [ -f $d/pulseprogram ]; then
+            grep PULPROG $d/acqus | sed -e 's/.*\<//' -e 's/>//' # first extract line PULPROG, then delete everything before last < and then remove trailing >
+            exptime $d
+        fi
+    fi
+done
+} >> $FILENAME
+
+printf "\nDone\n"
