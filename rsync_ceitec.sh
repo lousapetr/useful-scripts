@@ -1,6 +1,14 @@
 #!/bin/bash
 
-# mirror local directory structure to remote storage server
+MACHINE=        # name of server with storage capacity
+FROM=           # local directory to backup (e.g. /home/USER, ...)
+DAILY=          # remote directory (on $MACHINE) for everyday rsync backup (e.g. .../daily)
+MONTHLY=        # remote directory (on $MACHINE) for a tar dump of whole backup (e.g. .../montly)
+
+LOG=            # name of file to log the result of rsync backuping (e.g. ~/.cronlog)
+
+
+# rsync local directory structure to remote storage server
 function synchronize ()
 {
     from=$1
@@ -44,13 +52,6 @@ function full_dump ()
     echo
 }
 
-
-LOG=~/.cronlog_ceitec
-
-MACHINE=ssh.hsm1.ceitec.muni.cz
-FROM=/scratch/lousapetr/
-DAILY=/home/lousapetr/PSD/Hritz/PhD/LousaPetr/daily_backup 
-MONTHLY=/home/lousapetr/PSD/Hritz/PhD/LousaPetr/monthly_backup 
 
 case $1 in
     '-d')
