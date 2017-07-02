@@ -1,0 +1,315 @@
+#!/bin/bash
+
+##################################################
+#                   FidMaker                     #
+#                                                #
+#   author: Petr Lousa (lousapetr@mail.muni.cz)  #
+##################################################
+
+# if -n in command line arguments
+# do not run prepared fid.com
+
+while test $# -gt 0
+do
+    case "$1" in
+        -h) help=1
+            ;;
+        -n) dry_run=1
+            ;;
+    esac
+    shift
+done
+
+if [ -n "$help" ] # help is initialized
+then
+    printf 'FidMaker 
+script for automated preparation of fid.com scripts for processing of NMR data
+
+Usage:
+run fidmaker within directory with 2D or 3D data
+
+fidmaker [-h] [-n]
+
+    -h Show this help
+    -n dry run - only writes fid.com without running it
+
+If you have file experiments in directory above, it will be used as source of conditions.
+Structure of ../experiments:
+temperature / K = 300.0
+pH = 7
+salt concentration / mM = 150
+'
+    exit
+fi
+
+# determine 2D or 3D data and operate with them appropriately
+if [ -e acqu3s ]
+then
+    echo '3D data detected'
+    is3D=1	# true
+elif [ -e acqu2s ] && [ ! -e acqu3s ]
+then
+    echo '2D data detected'
+    is3D=0	# false
+else
+    echo 'ERROR: Files acqu2s or acqu3s not found.'
+    echo 'Please call this script from a directory with NMR data (containing acqu* files).'
+    exit 1
+fi
+
+# detect trosy experiment
+if grep -iq trosy pulseprogram
+then
+    trosy=1
+    trosy_str="TROSY experiment detected."
+    echo $trosy_str
+fi
+    
+
+# {print $NF} prints last item of line
+swap=`awk '/BYTORDA/{print $NF}' acqus`
+decim=`awk '/DECIM/{print $NF}' acqus`
+dspfvs=`awk '/DSPFVS/{print $NF}' acqus`
+grpdly=`awk '/GRPDLY/{print $NF}' acqus`
+
+tdx=`awk '/[^a-zA-Z]TD=/{print $NF}' acqus`
+tdy=`awk '/[^a-zA-Z]TD=/{print $NF}' acqu2s`
+modey=`awk '/FnMODE/{print $NF}' acqu2s`
+swx=`awk '/SW_h/{print $NF}' acqus`
+swy=`awk '/SW_h/{print $NF}' acqu2s`
+bfx=`awk '/BF1/{print $NF}' acqus`
+bfy=`awk '/BF1/{print $NF}' acqu2s`
+sfx=`awk '/SFO1/{print $NF}' acqus`
+sfy=`awk '/SFO1/{print $NF}' acqu2s`
+
+
+# extract items for 3D data
+if (( $is3D ))
+then
+    tdz=`awk '/[^a-zA-Z]TD=/{print $NF}' acqu3s`
+    modez=`awk '/FnMODE/{print $NF}' acqu3s`
+    swz=`awk '/SW_h/{print $NF}' acqu3s`
+    bfz=`awk '/BF1/{print $NF}' acqu3s`
+    sfz=`awk '/SFO1/{print $NF}' acqu3s`
+fi
+  
+# decide whether to byte-swap data
+if (( $swap == 0 ))
+then
+    swap="-aswap"
+else
+    swap="-noaswap"
+fi
+
+
+# compute some stuff by 'bc'
+    #number of real points - half of total
+realx=`echo "$tdx / 2" | bc`
+realy=`echo "$tdy / 2" | bc`
+realz=`echo "$tdz / 2" | bc`
+  #carrier frequency in Hz
+carx=`echo "( $sfx - $bfx ) / $bfx * 1000000" | bc -l`
+cary=`echo "( $sfy - $bfy ) / $bfy * 1000000" | bc -l`
+carz=`echo "( $sfz - $bfz ) / $bfz * 1000000" | bc -l`
+
+
+# determine MODE of indirect domain
+case "$modey" in
+    '3' ) modey='TPPI';;
+    '4' ) modey='Complex';;
+    '5' ) modey='States-TPPI';;
+    '6' ) modey='Echo-AntiEcho';;
+esac
+
+case "$modez" in
+    '3' ) modez='TPPI';;
+    '4' ) modez='Complex';;
+    '5' ) modez='States-TPPI';;
+    '6' ) modez='Echo-AntiEcho';;
+esac
+
+
+# test Echo-AntiEcho - warn about phase correction in indirect domain
+if [ $modey == 'Echo-AntiEcho' ] 
+then
+    echo "MODE_Y = $modey - Take care about phase correction in first indirect domain."
+fi
+if [ is_3D == 1 ] && [ $modez == 'Echo-AntiEcho' ]
+then
+    echo "MODE_Z = $modez - Take care about phase correction in second indirect domain."
+fi
+
+
+filename='../experiments'
+
+    # read parameters for xcar
+    # if [ -f ../experiments ]
+    # then
+    #     filename='../experiments'
+    # else
+    #     if [ -x `command -v extractor` ]
+    #     then
+    #         old_path=`pwd`
+    #         cd ..
+    #         echo
+    #         echo "Starting Extractor"
+    #         extractor
+    #         echo "Extractor ended and created file ../experiments"
+    #         echo
+    #         cd $old_path
+    #         filename='../experiments'
+    #     fi
+    # fi
+
+if [ ! -e $filename ]
+then
+    echo -ne "\ntemperature / K = "
+    read t
+
+    echo -n "pH = "
+    read pH
+
+    echo -n "salt concentration / mM = "
+    read salt
+    echo
+else
+    t=`awk '/^temperature/{printf $NF; exit}' $filename`
+    pH=`awk '/^pH/{printf $NF}' $filename`
+    salt=`awk '/^salt/{printf $NF}' $filename`
+    echo
+fi
+
+# based on XCAR2 program by Lukas Zidek
+r_13C=0.251449530
+r_15N=0.101329118
+
+base_1H=$sfx
+o1=`echo "($sfx - $bfx) * 10^6" | bc -l`
+
+# base_13C=`awk -v base_1H=$base_1H -v r_13C=$r_13C ' BEGIN{ printf "%10.10f",0.25145020045668346784*base_1H }'`
+# base_15N=`awk -v base_1H=$base_1H -v r_15N=$r_15N ' BEGIN{ printf "%10.10f",0.10132912041080466785*base_1H }'`
+
+base_13C=`echo "0.25145020045668346784*$base_1H" | bc -l`
+base_15N=`echo "0.10132912041080466785*$base_1H" | bc -l`
+
+t_coef=-0.0119
+pH_coef=-0.002
+s_coef=-0.009
+
+w=`echo "4.766 + $t_coef * ($t-298.15) + $pH_coef * ($pH-7.0) + $s_coef * $salt / 100.0" | bc -l`
+d=`echo "($o1 + $base_1H * 10^6) / (1.0 + $w / 10^6) - $base_1H * 10^6" | bc -l`
+
+x_carx=`echo "$base_1H / ($base_1H + $d / 10^6) * (10^6 + $carx) - 10^6" | bc -l`
+x_cary=`echo "$base_15N / (($base_1H + $d / 10^6) * $r_15N) * (10^6 + $cary) - 10^6" | bc -l`
+x_carz=`echo "$base_13C / (($base_1H + $d / 10^6) * $r_13C) * (10^6 + $carz) - 10^6" | bc -l`
+# end of xcar2
+
+# Correct carrier frequencies due to TROSY effect
+if [ -n "$trosy" ]
+then
+    # trosy experiment
+    carx=`echo "$x_carx + 45 / $bfx" | bc -l`
+    cary=`echo "$x_cary - 45 / $bfy" | bc -l`
+    carz=$x_carz
+else
+    carx=$x_carx
+    cary=$x_cary
+    carz=$x_carz
+fi
+
+# PRINT FILE fid.com
+if (( ! $is3D ))	# ! means NOT
+then
+    printf \
+    'bruk2pipe -in ./ser \\
+    -bad 0.0 %s -DMX -decim %s -dspfvs %d -grpdly %.12f \\
+    -xN    %14d  -yN    %14d \\
+    -xT    %14d  -yT    %14d \\
+    -xMODE %14s  -yMODE %14s \\
+    -xSW   %14.3f  -ySW   %14.3f \\
+    -xOBS  %14.3f  -yOBS  %14.3f \\
+    -xCAR  %14.4f  -yCAR  %14.3f \\
+    -xLAB  %14s  -yLAB  %14s \\
+    -ndim  %14d  -aq2D  %14s \\
+    -out ./test.fid -verb -ov' \
+      $swap  $decim  $dspfvs  $grpdly \
+      $tdx   $tdy    \
+      $realx $realy  \
+      'DQD'  $modey  \
+      $swx   $swy    \
+      $bfx   $bfy    \
+      $carx  $cary   \
+      'HN'   '15N'   \
+      2      'States' > fid.com
+
+else
+    printf \
+    'bruk2pipe -in ./ser \\
+    -bad 0.0 %s -DMX -decim %s -dspfvs %d -grpdly %.12f \\
+    -xN    %14d  -yN    %14d  -zN    %14d \\
+    -xT    %14d  -yT    %14d  -zT    %14d \\
+    -xMODE %14s  -yMODE %14s  -zMODE %14s \\
+    -xSW   %14.3f  -ySW   %14.3f  -zSW   %14.3f \\
+    -xOBS  %14.3f  -yOBS  %14.3f  -zOBS  %14.3f \\
+    -xCAR  %14.4f  -yCAR  %14.3f  -zCAR  %14.3f \\
+    -xLAB  %14s  -yLAB  %14s  -zLAB  %14s \\
+    -ndim  %14d  -aq2D  %14s         %14s \\
+    -out %s -verb -ov' \
+      $swap  $decim  $dspfvs  $grpdly \
+      $tdx   $tdy   $tdz   \
+      $realx $realy $realz \
+      'DQD'  $modey $modez \
+      $swx   $swy   $swz \
+      $bfx   $bfy   $bfz \
+      $carx  $cary  $carz \
+      'HN'   '15N'  '13C' \
+      3      'States' '' \
+      './fid/test%03d.fid' > fid.com
+fi
+
+printf \
+'
+exit
+  
+####################
+Used parameters:
+from file %s
+    temperature / K = %s
+    pH = %s
+    salt / mM = %s
+' \
+    $filename $t $pH $salt >> fid.com
+
+if [ -n "$trosy" ]
+then
+    printf '
+%s
+Original carriers:
+%8.4f %8.3f
+' \
+    "$trosy_str" $x_carx $x_cary >> fid.com
+fi
+
+echo '--------------------------------------------------------------------------------'
+cat fid.com
+echo '--------------------------------------------------------------------------------'
+echo
+
+chmod u+x ./fid.com
+
+if [ -n "$dry_run" ]
+then
+    echo "Dry run detected - fid.com will not run."
+    exit
+fi
+
+# check if nmrpipe is already loaded and load it if not
+if ! module list 2>&1 | grep -q nmrpipe     # construction 2>&1 redirects stderr to stdout - module list outputs into stderr
+then
+    echo 'Loading module nmrpipe'
+    module load nmrpipe
+fi
+
+# run fid.com
+echo "Running fid.com"
+./fid.com

@@ -10,5 +10,3 @@ calculates difference and prints it in human-readable format.
 
 # `extractor`
 Shell script for creating list of NMR experiments with useful info.
-
-
