@@ -1,12 +1,35 @@
 #!/bin/bash
 
 MACHINE=        # name of server with storage capacity
-FROM=           # local directory to backup (e.g. /home/USER, ...)
+FROM=           # local directory to backup (e.g. /home/USER, ~/Work, ...)
 DAILY=          # remote directory (on $MACHINE) for everyday rsync backup (e.g. .../daily)
 MONTHLY=        # remote directory (on $MACHINE) for a tar dump of whole backup (e.g. .../montly)
 
-LOG=            # name of file to log the result of rsync backuping (e.g. ~/.cronlog)
+LOG=~/.cronlog            # name of file to log the result of rsync backuping (e.g. ~/.cronlog)
 
+# Usage:
+# 1. copy this script into your PATH (e.g. ~/bin)
+# 2. make it executable - 'chmod u+x rsync_ceitec.sh'
+# 3. fill out all variables above.
+# 4. create cron jobs
+# 5. DONE! - enjoy safety
+ 
+# Cron operation:
+# 1. run 'crontab -e'
+# 2. create jobs similarly to this:
+#   10 0 * * * ~/bin/rsync_ceitec.sh -d  # daily sync at 00:10am
+#   10 2 1 * * ~/bin/rsync_ceitec.sh -m  # permanent backup dump at 02:10am every 1st day in month
+# 3. save by 'ESC :wq' - like ordinary vi
+
+# Cron structure:
+#    *     *     *   *    *        command to be executed
+#    -     -     -   -    -
+#    |     |     |   |    |
+#    |     |     |   |    +----- day of week (0 - 6) (Sunday=0)
+#    |     |     |   +------- month (1 - 12)
+#    |     |     +--------- day of month (1 - 31)
+#    |     +----------- hour (0 - 23)
+#    +------------- min (0 - 59)
 
 # rsync local directory structure to remote storage server
 function synchronize ()
